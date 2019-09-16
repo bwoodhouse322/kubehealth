@@ -1,57 +1,85 @@
-package main
+package kubehealth
 
 import (
-	"fmt"
-	"os"
+	"strings"
+	"sync"
 
-	"k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
-func runPodHealthcheck(podList *v1.PodList) (healthCheckStatus bool) {
+// Check - struct containing all configurations for healthcheck
+type Check struct {
+	Namespace          string
+	KubeContext        string
+	Labels             string
+	IsVerbose          bool
+	HealthCheckRetries int
+	HealthCheckSleep   int
+	SkipEmptyNamespace bool
+	Resources          string
+}
 
-	// defaults to true
-	healthCheckStatus = true
+func (healthCheck *Check) healthCheckJob(clientset *kubernetes.Clientset, wg *sync.WaitGroup, check *bool) {
 
-	for _, pod := range podList.Items {
+	jobList := healthCheck.getJobList(healthCheck.Namespace, healthCheck.Labels, clientset)
 
-		if pod.Status.Phase != "Running" {
-			if pod.Status.Phase != "Succeeded" {
-				healthCheckStatus = false
-				fmt.Printf("Reason: [ERROR] POD IS NOT IN RUNNING or SUCCEEDED PHASE - NAME:%v INFO: PHASE: %v\n", pod.Name, pod.Status.Phase)
-			}
-		}
+	if !jobHealthCheckStatus {
+		printer, jobHealthCheckStatus, hardFail = checkJobStatus(jobList)
 
-		// totalContainers := len(pod.Spec.Containers)
-		for _, containerStatus := range pod.Status.ContainerStatuses {
-			if !containerStatus.Ready {
-
-				containerName := containerStatus.Name
-
-				// Check if containers lost in a running state [RARE]
-				if containerStatus.State.Running != nil {
-					fmt.Printf("[ERROR] Pod: %s Container: %s | Reason: [BAD RUNNING STATE] | Status: Container appears to be running with false ready state: %v\n", pod.Name, containerName, containerStatus.State.Running)
-					healthCheckStatus = false
-				}
-
-				// Check if containers in waiting state - means pod belongs to deployment / statefulset
-				if containerStatus.State.Waiting != nil {
-					fmt.Printf("[ERROR] Pod: %s Container: %s | Reason: [WAITING] | Status: %s\n", pod.Name, containerName, containerStatus.State.Waiting.Reason)
-					healthCheckStatus = false
-				}
-
-				// Check if container terminated and exit code isn't 0
-				if containerStatus.State.Terminated != nil {
-					if containerStatus.State.Terminated.ExitCode != 0 {
-						fmt.Printf("[ERROR] Pod: %s Container: %s | Reason: [TERMINATED BADLY] | Status: %s | Exit code: %v\n", pod.Name, containerName, containerStatus.State.Terminated.Reason, containerStatus.State.Terminated.ExitCode)
-						fmt.Println("[TERMINATING] Terminating healthcheck due to failed onetime pod")
-						os.Exit(1)
-						healthCheckStatus = false
-					}
-				}
-
-			}
-		}
+	} else {
+		*check = false
 	}
+	wg.Done()
 
-	return healthCheckStatus
+}
+
+func (healthCheck *Check) healthCheckDeployment(clientset *kubernetes.Clientset, wg *sync.WaitGroup, check *bool) {
+
+	deploymentList := healthCheck.getDeploymentList(healthCheck.Namespace, healthCheck.Labels, clientset)
+
+	if !deploymentHealthCheckStatus {
+		printer, deploymentHealthCheckStatus = checkDeploymentStatus(deploymentList)
+
+	} else {
+		*check = false
+
+	}
+	wg.Done()
+
+}
+
+func (healthCheck *Check) healthCheckStatefulSet(clientset *kubernetes.Clientset, wg *sync.WaitGroup, check *bool) {
+
+	statefulSetList := healthCheck.getStatefulSetList(healthCheck.Namespace, healthCheck.Labels, clientset)
+
+	if !statefulSetHealthcheckStatus {
+		printer, statefulSetHealthcheckStatus = checkStatefulSetStatus(statefulSetList)
+	} else {
+		*check = false
+	}
+	wg.Done()
+
+}
+
+func (healthCheck Check) parseResources() ResourceList {
+	parsedResources := strings.Split(healthCheck.Resources, ",")
+	resourceList := ResourceList{Deployment: false, StatefulSet: false, Job: false}
+
+	for _, resource := range parsedResources {
+		switch resource {
+		case "deployment", "deploy", "deployments":
+			resourceList.Deployment = true
+		case "job", "jobs":
+			resourceList.Job = true
+		case "statefulset", "ss", "statefulsets":
+			resourceList.StatefulSet = true
+
+		}
+
+	}
+	if resourceList.Deployment == false && resourceList.Job == false && resourceList.StatefulSet == false {
+
+		panic("No Resources Selected")
+	}
+	return resourceList
 }

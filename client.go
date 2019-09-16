@@ -1,4 +1,4 @@
-package main
+package kubehealth
 
 import (
 	"os"
@@ -8,13 +8,19 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-func configureClient() *kubernetes.Clientset {
+func (healthCheck Check) configureClient() *kubernetes.Clientset {
 
 	home := homeDir()
-	kubeconfig := filepath.Join(home, ".kube", "config")
+	kubeConfigPath := filepath.Join(home, ".kube", "config")
 
 	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfigPath},
+		&clientcmd.ConfigOverrides{
+			CurrentContext: healthCheck.KubeContext,
+		}).ClientConfig()
+
+	// config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		panic(err.Error())
 	}

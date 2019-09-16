@@ -1,31 +1,11 @@
-package main
+package kubehealth
 
 import (
 	"fmt"
 	"log"
 	"os"
-
-	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	"strings"
 )
-
-func getPodList(namespace, labels string, clientSet *kubernetes.Clientset) (podList *v1.PodList) {
-
-	opts := metav1.ListOptions{LabelSelector: labels}
-
-	podList, err := clientSet.CoreV1().Pods(namespace).List(opts)
-
-	if err != nil {
-		log.Fatalln("[ERROR] Failed to list pods. Stacktrace below:")
-		log.Fatal(err)
-	}
-
-	fmt.Printf("[NAMESPACE]: %s, [POD COUNT]: %v, [LABELS]: %v\n", namespace, len(podList.Items), labels)
-	fmt.Println("==============================================================")
-
-	return podList
-}
 
 // Note to self: Comment later please Abdul - use cobra instead
 func checkParams() (namespace, labels string) {
@@ -46,4 +26,15 @@ func checkParams() (namespace, labels string) {
 	}
 
 	return namespace, labels
+}
+
+func logResourceCounts(resourceType string, size int, labels string, namespace string) {
+
+	if size < 1 {
+		log.Fatalf("[ERROR] No %s found in the namespace matching given criteria.", resourceType)
+	}
+
+	fmt.Printf("[NAMESPACE]: %s, [ %s COUNT]: %v, [LABELS]: %v\n", namespace, strings.ToUpper(resourceType), size, labels)
+	fmt.Println("==============================================================")
+
 }
